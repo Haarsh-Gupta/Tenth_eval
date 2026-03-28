@@ -1,0 +1,21 @@
+[project]
+name = "cbse-evaluation"
+version = "0.1.0"
+description = "AI-powered Class X History evaluation pipeline."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "streamlit",
+    "langchain",
+    "langchain-core",
+    "langchain-google-genai",
+    "langgraph",
+    "google-generativeai",
+    "langchain-openai",
+    "langchain-pinecone",
+    "pinecone",
+    "Pillow",
+    "pydantic",
+    "pydantic-settings",
+    "python-dotenv",
+]
