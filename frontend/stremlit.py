@@ -233,12 +233,20 @@ if result:
 
     # Secondary Details
     with st.expander("📝 OCR & RAG Details"):
-        tab_ocr, tab_rag = st.tabs(["Extracted Text", "Knowledge Source"])
+        tab_ocr, tab_queries, tab_rag = st.tabs(["Extracted Text", "Search Queries", "Knowledge Source"])
         with tab_ocr:
             st.subheader("Extracted Question")
             st.code(result.get('question', ''))
             st.subheader("Extracted Student Answer")
             st.code(result.get('student_answer', ''))
+        with tab_queries:
+            st.subheader("🔍 Generated RAG Queries")
+            queries = result.get('search_queries', [])
+            if queries:
+                for idx, q in enumerate(queries, 1):
+                    st.markdown(f"{idx}. {q}")
+            else:
+                st.info("No search queries were generated.")
         with tab_rag:
             for item in result.get('context', []):
                 st.markdown(f"**Source:** {item.get('book_name')}")

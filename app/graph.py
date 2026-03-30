@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 # ==================== LLM SETUP ====================
 llm_pro_3_1 = ChatGoogleGenerativeAI(
     model="gemini-3.1-pro-preview", 
-    temperature=1.0, 
-    thinking_level="high", # Accepts: 'low', 'medium', or 'high'
-    # include_thoughts=True,
+    temperature=0.0, 
+    max_retries=2,
+    timeout=45.0,
     google_api_key=settings.google_api_key
 )
 
@@ -92,6 +92,16 @@ def prepare_image_content_for_evaluation(prompt_text: str, files_path: List[str]
         })
     return content_blocks
 
+def _extract_text_from_response(response) -> str:
+    if isinstance(response.content, str):
+        return response.content
+    elif isinstance(response.content, list):
+        return "".join(
+            p.get("text", "") if isinstance(p, dict) else (p.text if hasattr(p, "text") else str(p))
+            for p in response.content
+        )
+    return str(response.content)
+
 # ==================== GRAPH NODES ====================
 
 def ocr_node(state: AgentState) -> Dict:
@@ -125,13 +135,13 @@ def ocr_node(state: AgentState) -> Dict:
     try:
         # Primary OCR: 3.1 Pro
         response = llm_pro_3_1.invoke([msg])
-        data = ocr_parser.parse(response.content)
+        data = ocr_parser.parse(_extract_text_from_response(response))
     except Exception as e:
         logger.warning(f"Primary OCR (3.1) failed: {e}. Falling back to 2.5 Pro.")
         try:
             # Fallback OCR: 2.5 Pro
             response = llm_pro_2_5.invoke([msg])
-            data = ocr_parser.parse(response.content)
+            data = ocr_parser.parse(_extract_text_from_response(response))
         except Exception as e2:
             logger.error(f"Fallback OCR (2.5) also failed: {e2}")
             return {"question": "Error during OCR", "student_answer": f"Details: {e2}"}
@@ -150,7 +160,7 @@ def query_node(state: AgentState) -> Dict:
     try:
         prompt_str = QUERY_GENERATOR_PROMPT.format(question=question)
         response = llm_flash_2_5.invoke([HumanMessage(content=prompt_str)])
-        data = query_parser.parse(response.content)
+        data = query_parser.parse(_extract_text_from_response(response))
         
         # New queries
         new_queries = data.get("queries", [])
@@ -214,7 +224,7 @@ def evaluation_node(state: AgentState) -> Dict:
         else:
             response = llm_flash_2_5.invoke([HumanMessage(content=prompt_text)])
             
-        eval_data = evaluation_parser.parse(response.content)
+        eval_data = evaluation_parser.parse(_extract_text_from_response(response))
         
         # Draw marks on image if available
         annotated_paths = []
