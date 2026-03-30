@@ -27,14 +27,22 @@ from app.utils.image_marker import draw_marks_on_image, create_virtual_marked_sh
 logger = logging.getLogger(__name__)
 
 # ==================== LLM SETUP ====================
-llm_flash = ChatGoogleGenerativeAI(
+llm_pro_3_1 = ChatGoogleGenerativeAI(
     model="gemini-3.1-pro-preview", 
     temperature=1.0, 
     thinking_level="high", # Accepts: 'low', 'medium', or 'high'
     # include_thoughts=True,
     google_api_key=settings.google_api_key
 )
-llm_pro = ChatGoogleGenerativeAI(
+
+llm_flash_2_5 = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash", 
+    temperature=1.0, 
+    # thinking_level="high", # Only supported for reasoning models
+    google_api_key=settings.google_api_key
+)
+
+llm_pro_2_5 = ChatGoogleGenerativeAI(
     model="gemini-2.5-pro", 
     temperature=0.0, 
     google_api_key=settings.google_api_key
@@ -108,15 +116,23 @@ def ocr_node(state: AgentState) -> Dict:
             
     msg = HumanMessage(content=message_content)
     try:
-        response = llm_pro.invoke([msg])
+        # Primary OCR: 3.1 Pro
+        response = llm_pro_3_1.invoke([msg])
         data = ocr_parser.parse(response.content)
-        return {
-            "question": data.get("question", ""),
-            "student_answer": data.get("answer", "")
-        }
     except Exception as e:
-        logger.error(f"OCR Error: {e}")
-        return {"question": "Error during OCR", "student_answer": f"Details: {e}"}
+        logger.warning(f"Primary OCR (3.1) failed: {e}. Falling back to 2.5 Pro.")
+        try:
+            # Fallback OCR: 2.5 Pro
+            response = llm_pro_2_5.invoke([msg])
+            data = ocr_parser.parse(response.content)
+        except Exception as e2:
+            logger.error(f"Fallback OCR (2.5) also failed: {e2}")
+            return {"question": "Error during OCR", "student_answer": f"Details: {e2}"}
+    
+    return {
+        "question": data.get("question", ""),
+        "student_answer": data.get("answer", "")
+    }
 
 def query_node(state: AgentState) -> Dict:
     """Step 2: Generate RAG lookup queries based on the Question."""
@@ -125,7 +141,7 @@ def query_node(state: AgentState) -> Dict:
     
     try:
         prompt_str = QUERY_GENERATOR_PROMPT.format(question=question)
-        response = llm_flash.invoke([HumanMessage(content=prompt_str)])
+        response = llm_flash_2_5.invoke([HumanMessage(content=prompt_str)])
         data = query_parser.parse(response.content)
         
         # New queries
@@ -185,9 +201,9 @@ def evaluation_node(state: AgentState) -> Dict:
     try:
         if files_path:
             content = prepare_image_content_for_evaluation(prompt_text, files_path)
-            response = llm_pro.invoke([HumanMessage(content=content)])
+            response = llm_flash_2_5.invoke([HumanMessage(content=content)])
         else:
-            response = llm_flash.invoke([HumanMessage(content=prompt_text)])
+            response = llm_flash_2_5.invoke([HumanMessage(content=prompt_text)])
             
         eval_data = evaluation_parser.parse(response.content)
         

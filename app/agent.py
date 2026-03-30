@@ -8,9 +8,12 @@ class ClassXEvaluationAgent:
 
     def get_metadata(self) -> dict:
         return {
-            "model_name": "Gemini 2.5 (Flash/Pro)",
-            "model_provider": "Google Google Generative AI",
-            "notes": "Using LangGraph for orchestrated OCR, RAG, and Evaluation."
+            "model_name": "Tiered (Pro 3.1/2.5 & Flash 2.5)",
+            "model_provider": "Google Generative AI",
+            "notes": "Multimodal OCR with Pro fallback, RAG-enhanced evaluation using Flash.",
+            "ocr_primary": "Gemini 3.1 Pro",
+            "ocr_fallback": "Gemini 2.5 Pro",
+            "reasoning": "Gemini 2.5 Flash"
         }
 
     def stream_evaluation(self, question: Optional[str] = None, student_answer: Optional[str] = None, file_paths: Optional[List[str]] = None, instructions: Optional[str] = None) -> Generator:

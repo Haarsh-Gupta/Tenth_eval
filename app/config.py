@@ -19,4 +19,13 @@ class Settings(BaseSettings):
         "extra": "ignore"
     }
 
-settings = Settings()
+try:
+    settings = Settings()
+except ValidationError as e:
+    # Print clear instructions for the user when this fails on server
+    print("\n" + "="*50)
+    print("❌ CONFIGURATION ERROR: Missing required environment variables.")
+    print("Please ensure GOOGLE_API_KEY, OPENAI_API_KEY, PINECONE_API_KEY, and RAG_INDEX_NAME are set.")
+    print("If deploying on Streamlit Cloud, add them to the 'Secrets' dashboard.")
+    print("="*50 + "\n")
+    raise e
