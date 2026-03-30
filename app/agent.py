@@ -30,9 +30,12 @@ class ClassXEvaluationAgent:
         
         # Stream the graph execution
         for event in self.graph.stream(initial_state):
-            # Each 'event' is a dict like {'node_name': {state_updates}}
-            node_name = next(iter(event))
-            yield node_name, event[node_name]
+            # Each 'event' is a dict where keys are node names and values are their state updates
+            if not event:
+                continue
+            for node_name, state_update in event.items():
+                if state_update is not None:
+                    yield node_name, state_update
 
     def full_evaluation(self, question: Optional[str] = None, student_answer: Optional[str] = None, file_paths: Optional[List[str]] = None, instructions: Optional[str] = None) -> Dict[str, Any]:
         """Run the full evaluation pipeline (Synchronous)."""

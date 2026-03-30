@@ -161,8 +161,9 @@ if st.button("🚀 Run Evaluation", width='stretch'):
                     elif node_name == "evaluation":
                         status.write("👨‍🏫 **Step 4:** Grading answer and generating visual annotations...")
                     
-                    # Accumulate state
-                    final_state.update(state_update)
+                    # Accumulate state safely
+                    if state_update and isinstance(state_update, dict):
+                        final_state.update(state_update)
                 
                 # Format final result (matching full_evaluation structure)
                 result = {

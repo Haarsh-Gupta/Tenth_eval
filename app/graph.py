@@ -51,7 +51,7 @@ llm_pro_2_5 = ChatGoogleGenerativeAI(
 
 # ==================== HELPER: CONTENT PREPARATION ====================
 def prepare_image_content(files_path: List[str]) -> List[Dict[str, Any]]:
-    # Combine the text prompt with images for Gemini Flash
+    # Standard LangChain/Google multimodal format
     content_blocks = [{"type": "text", "text": OCR_PROMPT_TEXT.replace("{format_instructions}", ocr_parser.get_format_instructions())}]
     
     for path in files_path:
@@ -69,7 +69,11 @@ def prepare_image_content(files_path: List[str]) -> List[Dict[str, Any]]:
         with open(path, 'rb') as f:
             base64_data = base64.b64encode(f.read()).decode("utf-8")
         
-        content_blocks.append({"type": "media", "data": base64_data, "mime_type": mime_type})
+        # Using image_url with data URI for better compatibility
+        content_blocks.append({
+            "type": "image_url", 
+            "image_url": {"url": f"data:{mime_type};base64,{base64_data}"}
+        })
         
     return content_blocks
 
@@ -82,7 +86,10 @@ def prepare_image_content_for_evaluation(prompt_text: str, files_path: List[str]
         if mime_type is None: mime_type = 'image/jpeg'
         with open(path, 'rb') as f:
             base64_data = base64.b64encode(f.read()).decode("utf-8")
-        content_blocks.append({"type": "media", "data": base64_data, "mime_type": mime_type})
+        content_blocks.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{base64_data}"}
+        })
     return content_blocks
 
 # ==================== GRAPH NODES ====================
@@ -137,7 +144,8 @@ def ocr_node(state: AgentState) -> Dict:
 def query_node(state: AgentState) -> Dict:
     """Step 2: Generate RAG lookup queries based on the Question."""
     logger.info("🧠 Query Node: Generating RAG queries...")
-    question = state.get("question", "")
+    # Defensive casting to string to avoid Pydantic validation errors
+    question = str(state.get("question", ""))
     
     try:
         prompt_str = QUERY_GENERATOR_PROMPT.format(question=question)
@@ -184,8 +192,9 @@ def rag_node(state: AgentState) -> Dict:
 def evaluation_node(state: AgentState) -> Dict:
     """Step 4: Evaluate the student's answer using the text context and images."""
     logger.info("👨‍🏫 Evaluation Node: Grading student answer...")
-    question = state.get("question", "")
-    student_answer = state.get("student_answer", "")
+    # Defensive casting to string to avoid Pydantic validation errors
+    question = str(state.get("question", ""))
+    student_answer = str(state.get("student_answer", ""))
     context_str = format_context(state.get("context", []))
     instructions = state.get("instructions") or instructions_prompt
     files_path = state.get("files_path", [])
