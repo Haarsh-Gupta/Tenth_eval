@@ -18,4 +18,9 @@ dependencies = [
     "pydantic",
     "pydantic-settings",
     "python-dotenv",
+    "fastapi",
+    "uvicorn[standard]",
+    "sse-starlette",
+    "rank-bm25",
+    "python-multipart",
 ]

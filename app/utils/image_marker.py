@@ -1,5 +1,5 @@
 import os
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from typing import List, Dict, Any, Optional, Tuple
 
 def create_virtual_marked_sheet(text: str, annotations: List[Dict[str, Any]], marks_awarded: int, total_marks: int, output_path: str) -> str:
@@ -30,125 +30,102 @@ def create_virtual_marked_sheet(text: str, annotations: List[Dict[str, Any]], ma
     wrapped_text = textwrap.fill(text, width=70)
     draw.text((50, 150), wrapped_text, fill=(50, 50, 50), font=font)
     
-    # Note: For virtual sheets, coordinates would need to be calculated based on text position.
-    # However, since the LLM gives coordinates for the *image*, this is tricky.
-    # For now, we'll just show the text and the feedback.
-    # Alternatively, we just save this as a 'sheet' and let draw_marks interpret it if we had pixel coords.
-    
     img.save(output_path)
     return output_path
 
 def draw_marks_on_image(image_path: str, annotations: List[Dict[str, Any]], marks_awarded: int, total_marks: int, output_path: Optional[str] = None) -> Optional[str]:
     """
-    Draws circles, highlights, and suggestion boxes on the student's answer sheet.
+    Draws yellow highlights on identified errors on the student's answer sheet.
+    Suggestions are shown in the feedback JSON, not on the image itself.
     """
     if not os.path.exists(image_path):
         return None
         
-    img = Image.open(image_path).convert("RGBA")
-    overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
-    draw_overlay = ImageDraw.Draw(overlay)
-    width, height = img.size
-    
-    # Try to load font - increase size for readability
+    # Use ImageOps.exif_transpose to handle orientation correctly
     try:
-        font_size = max(20, int(height/50))
-        # Try a few common fonts
-        for font_name in ["arial.ttf", "DejaVuSans.ttf", "Verdana.ttf"]:
-            try:
-                font = ImageFont.truetype(font_name, font_size)
-                break
-            except:
-                continue
-        else:
-            font = ImageFont.load_default()
-    except:
-        font = ImageFont.load_default()
+        img_orig = Image.open(image_path)
+        img = ImageOps.exif_transpose(img_orig).convert("RGBA")
+    except Exception as e:
+        print(f"Error opening image: {e}")
+        return None
         
-    # 1. Draw Annotations
+    width, height = img.size
+    overlay = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+    draw_overlay = ImageDraw.Draw(overlay)
+    
+    # 1. Draw Annotations (ONLY HIGHLIGHTS, NO SUGGESTIONS ON IMAGE)
     for i, ann in enumerate(annotations):
         coords = ann.get("coordinates")
-        if not coords or len(coords) != 4:
+        if not coords:
             continue
             
-        style = ann.get("marking_style", "circle")
         issue_type = ann.get("issue_type", "content_error")
-        suggestion = ann.get("suggestion")
-        
-        # Scale normalized coordinates (0-1000) to pixel coordinates
-        ymin, xmin, ymax, xmax = coords
-        left = xmin * width / 1000
-        top = ymin * height / 1000
-        right = xmax * width / 1000
-        bottom = ymax * height / 1000
-        
-        # Choose color based on issue type
-        if issue_type == "wrong_sentence":
-            color = (255, 0, 0, 180) # Strong Red
-            fill_color = (255, 0, 0, 60)
-            style = "highlight"
-        elif issue_type == "spelling":
-            color = (255, 50, 50, 255) # Light Red
-            fill_color = (255, 0, 0, 0)
-            style = "circle"
-        elif issue_type == "grammar":
-            color = (255, 165, 0, 255) # Orange
-            fill_color = (255, 165, 0, 30)
-            style = "underline"
+            
+        # Handle dict BoundingBox or fallback to list
+        if isinstance(coords, dict):
+            ymin = coords.get("ymin", 0)
+            xmin = coords.get("xmin", 0)
+            ymax = coords.get("ymax", 0)
+            xmax = coords.get("xmax", 0)
+        elif isinstance(coords, list) and len(coords) == 4:
+            ymin, xmin, ymax, xmax = coords
         else:
-            color = (255, 0, 0, 255) # Default Red
-            fill_color = (255, 0, 0, 20)
-
-        thickness = max(3, int(width / 500))
+            continue
+            
+        # Scale coordinates from 0-1000 normalized to pixel coordinates
+        top = (ymin * height) / 1000
+        left = (xmin * width) / 1000
+        bottom = (ymax * height) / 1000
+        right = (xmax * width) / 1000
         
-        if style == "circle":
-            draw_overlay.ellipse([left, top, right, bottom], outline=color, width=thickness)
-        elif style == "cross":
-            draw_overlay.line([left, top, right, bottom], fill=color, width=thickness)
-            draw_overlay.line([left, bottom, right, top], fill=color, width=thickness)
-        elif style == "underline":
-            draw_overlay.line([left, bottom, right, bottom], fill=color, width=thickness)
-        elif style == "tick":
-            mid_x = (left + right) / 2
-            draw_overlay.line([left, (top+bottom)/2, mid_x, bottom], fill=(0, 200, 0, 255), width=thickness)
-            draw_overlay.line([mid_x, bottom, right, top], fill=(0, 200, 0, 255), width=thickness)
-        elif style == "highlight":
-            draw_overlay.rectangle([left, top, right, bottom], fill=fill_color, outline=color, width=2)
+        # SMART PADDING: Gemini is often slightly off on small handwritten words.
+        # Add a ~20% safety margin to spelling boxes to comfortably enclose the word.
+        if issue_type == "spelling":
+            pad_y = (bottom - top) * 0.25
+            pad_x = (right - left) * 0.25
+            top = max(0, top - pad_y)
+            bottom = min(height, bottom + pad_y)
+            left = max(0, left - pad_x)
+            right = min(width, right + pad_x)
         
-        # Suggestions with "teacher's note" style
-        if suggestion:
-            text_x = right + 20
-            text_y = top - 10
-            
-            # Position suggestion note carefully
-            if text_x > width - 200: 
-                text_x = left - 220
-                if text_x < 0: text_x = 10
-            
-            note_content = f"Teacher suggests: {suggestion}"
-            # Word wrap the note if it's too long
-            import textwrap
-            wrapped_note = "\n".join(textwrap.wrap(note_content, width=25))
-            
-            # Draw line connecting note to the error
-            draw_overlay.line([(left+right)/2, top, (text_x if text_x > right else text_x+200), text_y+10], 
-                             fill=(255, 0, 0, 150), width=1)
-            
-            # Draw suggestion note with premium style
-            text_bbox = draw_overlay.textbbox((text_x, text_y), wrapped_note, font=font)
-            # Add padding to bbox
-            padded_bbox = [text_bbox[0]-5, text_bbox[1]-5, text_bbox[2]+5, text_bbox[3]+5]
-            draw_overlay.rectangle(padded_bbox, fill=(255, 255, 220, 240), outline=(255, 0, 0, 255), width=1)
-            draw_overlay.text((text_x, text_y), wrapped_note, fill=(180, 0, 0, 255), font=font)
+        # Consistent Yellow Highlight for everything as per user request
+        fill_color = (255, 255, 0, 80)    # Yellow highlight (semi-transparent)
+        border_color = (180, 180, 0, 150) # Darker yellow border/outline
+        
+        # Draw highlight rectangle
+        draw_overlay.rectangle([left, top, right, bottom], fill=fill_color, outline=border_color, width=3)
 
     # Combine overlay with original image
     combined = Image.alpha_composite(img, overlay)
     img = combined.convert("RGB")
     draw = ImageDraw.Draw(img)
 
-    # 2. Draw Final Marks (Top Right)
+    # 2. Draw Final Marks (Top Right) - Standard large style
     mark_text = f"Marks: {marks_awarded}/{total_marks}"
-    draw.text((width - 300, 50), mark_text, fill=(255, 0, 0), font=font, stroke_width=1, stroke_fill=(255,255,255))
+    
+    try:
+        font_size = max(40, int(height/15))
+        for font_name in ["arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf"]:
+            try:
+                large_font = ImageFont.truetype(font_name, font_size)
+                break
+            except: continue
+        else:
+            large_font = ImageFont.load_default()
+    except:
+        large_font = ImageFont.load_default()
+        
+    try:
+        bbox = draw.textbbox((0,0), mark_text, font=large_font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except:
+        tw, th = 300, 60
+        
+    m_x, m_y = width - tw - 60, 60
+    
+    # Backdrop for clarity
+    draw.rectangle([m_x - 15, m_y - 15, m_x + tw + 15, m_y + th + 15], fill=(255, 255, 255), outline=(255, 0, 0), width=4)
+    draw.text((m_x, m_y), mark_text, fill=(255, 0, 0), font=large_font, stroke_width=2, stroke_fill=(255,255,255))
     
     # 3. Save
     if output_path is None:

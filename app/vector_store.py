@@ -89,30 +89,64 @@ class PineconeVectorStoreWrapper(VectorStoreBase):
             for vid in id_list if vid in vectors
         ]
 
-    def search_and_rerank(self , query: str , k : int = 5 , fetch_k : int = 20 , filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        # if not self.reranker:
-        #     raise ValueError("Reranker was not provided during initialization of this store.")
-        
-        # Fallback: just return similarity search results directly
-        return self.store.similarity_search(query , k=k , filter=filter)
+    def search_and_rerank(self , query: str , k : int = 5 , fetch_k : int = 20 , filter: Optional[Dict[str, Any]] = None, rerank: bool = False) -> List:
+        if not rerank:
+            return self.store.similarity_search(query , k=k , filter=filter)
 
-        # inital_docs = self.store.similarity_search(query , k=fetch_k , filter=filter)
-        # if not inital_docs:
-        #     return []
-        # docs_for_rerank = []
-        # for doc in inital_docs:
-        #     docs_for_rerank.append({
-        #         "content" : doc.page_content,
-        #         "metadata" : doc.metadata,
-        #         "original_doc" : doc
-        #     })
-        # reranked_docs = self.reranker.rerank(
-        #     query = query, 
-        #     documents = docs_for_rerank ,
-        #     content_key = "content" ,
-        #     top_k=k
-        # )
-        # return [d["original_doc"] for d in reranked_docs]
+        # 1. Fetch more candidates via Vector Search
+        initial_docs = self.store.similarity_search(query , k=fetch_k , filter=filter)
+        if not initial_docs:
+            return []
+
+        # 2. Rerank using BM25
+        reranker = BM25Reranker()
+        docs_for_rerank = []
+        for doc in initial_docs:
+            docs_for_rerank.append({
+                "content" : doc.page_content,
+                "metadata" : doc.metadata,
+                "original_doc" : doc
+            })
+        
+        reranked_data = reranker.rerank(query=query, documents=docs_for_rerank, k=k)
+        return [d["original_doc"] for d in reranked_data]
+
+
+# ==================== BM25 RERANKER ====================
+from rank_bm25 import BM25Okapi
+from functools import lru_cache
+
+class BM25Reranker:
+    """Simple BM25 Reranker for fine-grained ranking of retrieved documents."""
+    
+    @staticmethod
+    def tokenize(text: str) -> List[str]:
+        # Simple tokenization; for better results use a proper NLP library if available
+        return text.lower().split()
+
+    @lru_cache(maxsize=100)
+    def _get_bm25_instance(self, corpus_tuple: tuple):
+        """Cache BM25 instance based on a hashable version of the corpus."""
+        return BM25Okapi(list(corpus_tuple))
+
+    def rerank(self, query: str, documents: List[Dict[str, Any]], k: int = 5) -> List[Dict[str, Any]]:
+        """Rerank a small set of documents using BM25."""
+        if not documents:
+            return []
+            
+        tokenized_query = self.tokenize(query)
+        # Create a hashable version of the corpus for caching
+        corpus = [tuple(self.tokenize(doc["content"])) for doc in documents]
+        
+        # In practice, for a small 'documents' list (e.g. 20-50), 
+        # initializing BM25 is very fast, but we'll use a cacheable method anyway.
+        bm25 = BM25Okapi(corpus)
+        
+        scores = bm25.get_scores(tokenized_query)
+        
+        # Sort documents by score
+        doc_scores = sorted(zip(documents, scores), key=lambda x: x[1], reverse=True)
+        return [ds[0] for ds in doc_scores[:k]]
 
 
 # ==================== INITIALIZE EMBEDDINGS ====================

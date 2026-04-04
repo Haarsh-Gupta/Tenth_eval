@@ -31,7 +31,7 @@ llm_pro_3_1 = ChatGoogleGenerativeAI(
     model="gemini-3.1-pro-preview", 
     temperature=0.0, 
     max_retries=2,
-    timeout=45.0,
+    timeout=60.0,
     google_api_key=settings.google_api_key
 )
 
@@ -80,12 +80,31 @@ def prepare_image_content(files_path: List[str]) -> List[Dict[str, Any]]:
 def prepare_image_content_for_evaluation(prompt_text: str, files_path: List[str]) -> List[Dict[str, Any]]:
     content_blocks = [{"type": "text", "text": prompt_text}]
     
+    from PIL import Image, ImageOps
+    import io
+
     for path in files_path:
         if not os.path.exists(path): continue
-        mime_type, _ = mimetypes.guess_type(path)
-        if mime_type is None: mime_type = 'image/jpeg'
-        with open(path, 'rb') as f:
-            base64_data = base64.b64encode(f.read()).decode("utf-8")
+        
+        try:
+            # Explicitly load and transpose the image so Gemini sees the exact same
+            # oriented pixel grid that our drawing tool (image_marker.py) will see.
+            img = Image.open(path)
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            
+            # Save to buffer as JPEG
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=95)
+            base64_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            mime_type = "image/jpeg"
+        except Exception as e:
+            logger.error(f"Image normalization failed for {path}: {e}")
+            # Fallback to raw bytes
+            mime_type, _ = mimetypes.guess_type(path)
+            if mime_type is None: mime_type = 'image/jpeg'
+            with open(path, 'rb') as f:
+                base64_data = base64.b64encode(f.read()).decode("utf-8")
+
         content_blocks.append({
             "type": "image_url",
             "image_url": {"url": f"data:{mime_type};base64,{base64_data}"}
@@ -174,6 +193,7 @@ def rag_node(state: AgentState) -> Dict:
     """Step 3: Retrieve Class X specific context from knowledge base."""
     logger.info("🔎 RAG Node: Searching Pinecone for 'History class tenth'...")
     queries = state.get("search_queries", [])
+    use_rerank = state.get("use_reranking", False)
     
     # Use a dictionary to keep only unique chunks by content
     unique_context_map = {}
@@ -182,14 +202,23 @@ def rag_node(state: AgentState) -> Dict:
         try:
             # Filter solely for History Class 10 book as per user request
             filter_dict = {"book_name": "History Class 10"}
-            results = RAG_VECTOR_STORE.search_and_rerank(query=q, k=3, fetch_k=10, filter=filter_dict)
+            # Fetch 10 if reranking, else 3
+            fetch_k = 10 if use_rerank else 3
+            results = RAG_VECTOR_STORE.search_and_rerank(
+                query=q, k=3, fetch_k=fetch_k, filter=filter_dict, rerank=use_rerank
+            )
             
             for doc in results:
-                content = doc.page_content.strip()
+                content = getattr(doc, "page_content", "") # Handle cases if it's not a Doc object
+                if hasattr(doc, "page_content"):
+                    content = doc.page_content.strip()
+                else:
+                    content = str(doc).strip()
+                    
                 if content not in unique_context_map:
                     unique_context_map[content] = {
                         "content": content,
-                        "book_name": doc.metadata.get("book_name", "Unknown")
+                        "book_name": doc.metadata.get("book_name", "Unknown") if hasattr(doc, "metadata") else "History class tenth"
                     }
         except Exception as e:
             logger.error(f"RAG Error on query '{q}': {e}")

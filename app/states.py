@@ -6,6 +6,7 @@ class AgentState(TypedDict):
     # --- Input ---
     files_path: List[str] # List of image/pdf paths
     instructions: Optional[str] # Evaluation instructions
+    use_reranking: bool # Use BM25 reranking
     
     # --- Extracted from images (OCR Node) ---
     question: Optional[str]

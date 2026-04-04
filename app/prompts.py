@@ -18,9 +18,9 @@ class VisualAnnotation(BaseModel):
     """Schema for marking errors on the answer sheet image."""
     text: str = Field(description="The specific text snippet that is incorrect.")
     issue_type: Literal["spelling", "grammar", "content_error", "missing_info", "wrong_sentence"] = Field(description="The nature of the issue.")
-    coordinates: List[int] = Field(description="The normalized [ymin, xmin, ymax, xmax] coordinates (0-1000) for the location of this error on the image.")
-    marking_style: Literal["circle", "cross", "underline", "tick", "highlight", "suggestion_box"] = Field(description="Which visual mark to use.")
-    suggestion: Optional[str] = Field(description="Corrected text or proposed improvement for this specific error.")
+    coordinates: List[int] = Field(description="Provide EXACTLY 4 integers as [ymin, xmin, ymax, xmax] (normalized 0-1000). ymin=Top, xmin=Left, ymax=Bottom, xmax=Right. Use visual grounding to map perfectly to the image.")
+    marking_style: Literal["highlight"] = Field(description="Use 'highlight' for all errors.")
+    suggestion: Optional[str] = Field(description="Corrected text or proposed improvement.")
 
 class EvaluationSchema(BaseModel):
     """Schema for Evaluation Node."""
@@ -102,9 +102,9 @@ Also, identify the exact locations of errors (spelling, grammar, or logic) on th
 Assume total_marks = 5
 
 ### SPECIFIC INSTRUCTIONS FOR VISUAL ANNOTATIONS:
-1. **Wrong Sentences**: Mark red highlights over sentences that are factually incorrect or irrelevant to the question.
-2. **Spelling Mistakes**: Circle every misspelled word in red.
-3. **Suggestions**: For each error, provide a concise correction or a "suggested line" which would have been better.
+1. **Errors & Feedback**: Apply a YELLOW highlight box over any identified error (spelling, grammar, or wrong/irrelevant sentence).
+2. **Suggestions**: For each highlight, provide a concise correction in the JSON 'suggestion' field. These will be shown to the user separately.
+3. **NO OTHER MARKS**: Use ONLY yellow highlights. Do not use circles, crosses, or red markers.
 
 ### QUESTION ASKED:
 {question}
@@ -119,7 +119,13 @@ Assume total_marks = 5
 {instructions}
 
 ### COORDINATES GUIDELINE:
-Determine the bounding box [ymin, xmin, ymax, xmax] for any identified errors on the student's answer image using a 0-1000 normalized coordinate system where 0 is the top/left and 1000 is the bottom/right.
+Determine the exact bounding box for any identified errors on the student's answer image using a 0-1000 normalized coordinate system where 0 is the top/left and 1000 is the bottom/right. 
+You MUST provide the coordinates in the format `[ymin, xmin, ymax, xmax]` as a JSON array of four integers.
+- ymin: Top edge of box
+- xmin: Left edge of box
+- ymax: Bottom edge of box
+- xmax: Right edge of box
+For example, a box might be `[120, 450, 150, 800]`. Do NOT swap x and y.
 
 Output MUST be a valid JSON matching this schema:
 {format_instructions}
